@@ -1,0 +1,40 @@
+#include <linux/kvm.h>
+#include <asm/kvm.h>
+
+/* Nasty workaround from here: https://github.com/rust-lang/rust-bindgen/issues/753#issuecomment-308901773 */
+const __u64 _KVM_GET_REGS = KVM_GET_REGS;
+#undef KVM_GET_REGS
+const __u64 KVM_GET_REGS = _KVM_GET_REGS;
+
+const __u64 _KVM_GET_API_VERSION = KVM_GET_API_VERSION;
+#undef KVM_GET_API_VERSION
+const __u64 KVM_GET_API_VERSION = _KVM_GET_API_VERSION;
+
+const __u64 _KVM_CREATE_VM = KVM_CREATE_VM;
+#undef KVM_CREATE_VM
+const __u64 KVM_CREATE_VM = _KVM_CREATE_VM;
+
+const __u64 _KVM_SET_USER_MEMORY_REGION = KVM_SET_USER_MEMORY_REGION;
+#undef KVM_SET_USER_MEMORY_REGION
+const __u64 KVM_SET_USER_MEMORY_REGION = _KVM_SET_USER_MEMORY_REGION;
+
+const __u64 _KVM_CREATE_VCPU = KVM_CREATE_VCPU;
+#undef KVM_CREATE_VCPU
+const __u64 KVM_CREATE_VCPU = _KVM_CREATE_VCPU;
+
+const __u64 _KVM_GET_SREGS = KVM_GET_SREGS;
+#undef KVM_GET_SREGS
+const __u64 KVM_GET_SREGS = _KVM_GET_SREGS;
+
+const __u64 _KVM_SET_SREGS = KVM_SET_SREGS;
+#undef KVM_SET_SREGS
+const __u64 KVM_SET_SREGS = _KVM_SET_SREGS;
+
+const __u64 _KVM_GET_VCPU_MMAP_SIZE = KVM_GET_VCPU_MMAP_SIZE;
+#undef KVM_GET_VCPU_MMAP_SIZE
+const __u64 KVM_GET_VCPU_MMAP_SIZE = _KVM_GET_VCPU_MMAP_SIZE;
+
+const __u64 _KVM_SET_REGS = KVM_SET_REGS;
+#undef KVM_SET_REGS
+const __u64 KVM_SET_REGS = _KVM_SET_REGS;
+
