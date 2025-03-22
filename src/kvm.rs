@@ -1,12 +1,15 @@
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::Read;
 use std::num::NonZeroUsize;
 use std::ops::{Add, BitAnd};
 use std::{io, path::Path};
-use std::os::fd::RawFd;
+use std::os::fd::{BorrowedFd, RawFd};
 
 use nix::{fcntl::{open, OFlag}, sys::stat::Mode};
 use nix::unistd::close;
+
+use crate::error;
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
@@ -17,6 +20,7 @@ pub struct Kvm {
     vm_fd: RawFd,
     vcpu_fd: RawFd,
     memory: MmapChunk,
+    actions: BTreeMap<u32, Box<dyn Fn(&Kvm) -> bool>>,
 }
 
 impl Kvm {
@@ -31,7 +35,7 @@ impl Kvm {
         } else {
             let vm_fd = Self::create_vm(fd)?;
 
-            let memory = MmapChunk::new(NonZeroUsize::new(binary_file_size as _).expect("binary_path file should have nonzero size"))?;
+            let memory = MmapChunk::new_anonymous(NonZeroUsize::new(binary_file_size as _).expect("binary_path file should have nonzero size"))?;
             binary_file.read(memory.as_slice())?; // Read bytes into mmap chunk
     
             let region = kvm_userspace_memory_region {
@@ -78,12 +82,56 @@ impl Kvm {
                 return Err(io::Error::last_os_error());
             }
 
-            Ok(Self { fd, vm_fd, vcpu_fd, memory })
+            Ok(Self {
+                fd, vm_fd, vcpu_fd, memory, 
+                actions: BTreeMap::new() 
+            })
         }
     }
 
-    fn api_version(fd: RawFd) -> i32 {
+    pub fn register_action(&mut self, event: u32, action: Box<dyn Fn(&Kvm) -> bool>) {
+        self.actions.insert(event, action);
+    }
+
+    pub fn run(&self) -> error::Result<()> {
+        let run_size: isize = unsafe { libc::ioctl(self.fd, KVM_GET_VCPU_MMAP_SIZE, 0) } as _;
+        if run_size < 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+
+        let run_map_size = NonZeroUsize::new(run_size as _).ok_or(error::Error::ZeroSizedKvmSharedMemoryRegion)?;
+        let borrowed_vcpu_fd = unsafe { BorrowedFd::borrow_raw(self.vcpu_fd) };
+        let run_map = MmapChunk::new(run_map_size, borrowed_vcpu_fd)?;
+
+        let run = run_map.ptr() as *mut kvm_run;
+        loop {
+            if unsafe { libc::ioctl(self.vcpu_fd, KVM_RUN, 0) } < 0 {
+                return Err(io::Error::last_os_error().into());
+            }
+
+            let exit_reason = unsafe { std::ptr::read_volatile(&(*run).exit_reason) };
+
+            let action: &Box<dyn for<'a> Fn(&'a Kvm) -> bool> = self.actions.get(&exit_reason).ok_or(error::Error::NoActionRegistered(exit_reason))?;
+            if !action(self) {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn api_version(fd: RawFd) -> i32 {
         unsafe { libc::ioctl(fd, KVM_GET_API_VERSION, 0) }
+    }
+
+    pub fn regs(&self) -> io::Result<kvm_regs> {
+        let mut regs: kvm_regs = Default::default();
+
+        if unsafe { libc::ioctl(self.vcpu_fd, KVM_GET_REGS, &raw mut regs) } < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(regs)
+        }
     }
 
     fn create_vm(fd: RawFd) -> io::Result<i32> {
@@ -110,6 +158,7 @@ impl Drop for Kvm {
     fn drop(&mut self) {
         close(self.vm_fd).expect("nix::unistd::close should not fail on KVM fd");
         close(self.fd).expect("nix::unistd::close should not fail on KVM file fd");
+        close(self.vcpu_fd).expect("nix::unistd::close should not fail on KVM vCPU fd");
     }
 }
 
@@ -117,5 +166,5 @@ fn pgroundup<T: Add<Output = T> + BitAnd<Output = T> + From<u32>>(value: T) -> T
     (value + 4095.into()) & (!4095).into()
 }
 
-const KVM_DEVICE_FILE_PATH: &'static str = "/dev/kvm";
+const KVM_DEVICE_FILE_PATH: &str = "/dev/kvm";
 

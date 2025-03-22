@@ -38,3 +38,7 @@ const __u64 _KVM_SET_REGS = KVM_SET_REGS;
 #undef KVM_SET_REGS
 const __u64 KVM_SET_REGS = _KVM_SET_REGS;
 
+const __u64 _KVM_RUN = KVM_RUN;
+#undef KVM_RUN
+const __u64 KVM_RUN = _KVM_RUN;
+

@@ -2,31 +2,17 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    // Tell cargo to look for shared libraries in the specified directory
-    //println!("cargo:rustc-link-search=/path/to/lib");
-
-    // Tell cargo to tell rustc to link the system bzip2
-    // shared library.
-    //println!("cargo:rustc-link-lib=bz2");
-
-    // The bindgen::Builder is the main entry point
-    // to bindgen, and lets you build up options for
-    // the resulting bindings.
     let bindings = bindgen::Builder::default()
-        // The input header we would like to generate
-        // bindings for.
+        // Wrapper for actual header files in the system include path
         .header("wrapper.h")
-        // Tell cargo to invalidate the built crate whenever any of the
-        // included header files changed.
+        // Tell cargo to invalidate the built crate whenever any of the included header files changed
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        // Suppress all those warnings...
+        // Suppress all those warnings... (TODO: make this actually work)
         .raw_line("#[allow(non_camel_case_types)]")
-        // Derive default implementations
+        // Derive std::default::Default implementations
         .derive_default(true)
-        // Finish the builder and generate the bindings.
-        .generate()
-        // Unwrap the Result and panic on failure.
-        .expect("Unable to generate bindings");
+        // Generate the bindings
+        .generate().expect("Unable to generate bindings");
 
     // Write the bindings to the $OUT_DIR/bindings.rs file.
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());

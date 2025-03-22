@@ -1,7 +1,7 @@
 use core::ffi::c_void;
-use std::{num::NonZeroUsize, ptr::NonNull, io};
+use std::{io, num::NonZeroUsize, os::fd::AsFd, ptr::NonNull};
 
-use nix::sys::mman::{mmap_anonymous, munmap, MapFlags, ProtFlags};
+use nix::sys::mman::{mmap, mmap_anonymous, munmap, MapFlags, ProtFlags};
 
 pub struct MmapChunk {
     ptr: NonNull<c_void>,
@@ -9,13 +9,22 @@ pub struct MmapChunk {
 }
 
 impl MmapChunk {
-    pub fn new(size: NonZeroUsize) -> io::Result<Self> {
+    pub fn new_anonymous(size: NonZeroUsize) -> io::Result<Self> {
         let prot = ProtFlags::PROT_READ | ProtFlags::PROT_WRITE;
         let flags = MapFlags::MAP_PRIVATE; // MAP_ANONYMOUS handled by `mmap_anonymous`
 
         let ptr = unsafe { mmap_anonymous(None, size, prot, flags) }.map_err(|errno| io::Error::from_raw_os_error(errno as _))?;
 
         Ok(Self{ ptr, size })
+    }
+
+    pub fn new<F: AsFd>(size: NonZeroUsize, fd: F) -> io::Result<Self> {
+        let prot = ProtFlags::PROT_READ | ProtFlags::PROT_WRITE;
+        let flags = MapFlags::MAP_SHARED;
+
+        let ptr = unsafe { mmap(None, size, prot, flags, fd, 0) }?;
+
+        Ok(Self { ptr, size })
     }
 
     pub fn size(&self) -> usize {
