@@ -8,6 +8,7 @@ use std::os::fd::{BorrowedFd, RawFd};
 
 use nix::{fcntl::{open, OFlag}, sys::stat::Mode};
 use nix::unistd::close;
+use num_traits::PrimInt;
 
 use crate::error;
 
@@ -28,7 +29,7 @@ pub struct Kvm {
     fd: RawFd,
     vm_fd: RawFd,
     vcpu_fd: RawFd,
-    memory: MmapChunk,
+    maps: Vec<MmapChunk>,
     actions: BTreeMap<u32, Box<dyn Fn(&Kvm) -> bool>>,
 }
 
@@ -91,8 +92,10 @@ impl Kvm {
                 return Err(io::Error::last_os_error());
             }
 
+            let maps = vec![memory];
+
             Ok(Self {
-                fd, vm_fd, vcpu_fd, memory, 
+                fd, vm_fd, vcpu_fd, maps, 
                 actions: BTreeMap::new() 
             })
         }
@@ -143,6 +146,79 @@ impl Kvm {
         }
     }
 
+    pub fn set_regs(&mut self, regs: &kvm_regs) -> io::Result<()> {
+        let regs_ptr = regs as *const kvm_regs;
+        if unsafe { libc::ioctl(self.vcpu_fd, KVM_SET_REGS, regs_ptr) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok(())
+    }
+
+    pub fn set_sregs(&mut self, sregs: &kvm_sregs) -> io::Result<()> {
+        let sregs_ptr = sregs as *const kvm_sregs;
+        if unsafe { libc::ioctl(self.vcpu_fd, KVM_SET_SREGS, sregs_ptr) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok(())
+    }
+
+    pub fn map_guest_memory(&mut self, guest_phys_addr: u64, len: u64, flags: u32) -> io::Result<SlotId> {
+        let slot = self.maps.len().try_into().expect("Should not have more than 2^32 mapped regions"); // Next available slot
+
+        let chunk = MmapChunk::new_anonymous(NonZeroUsize::new(len as _).expect("shouldn't try to map a region with zero size"))?;
+
+        let userspace_addr = chunk.ptr() as u64;
+        let memory_size = pgroundup(len);
+
+        let mut region = kvm_userspace_memory_region { slot, guest_phys_addr, userspace_addr, flags, memory_size };
+
+        if unsafe { libc::ioctl(self.vm_fd, KVM_SET_USER_MEMORY_REGION, &raw mut region) } < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            self.maps.push(chunk);
+            Ok(slot)
+        }
+    }
+
+    pub fn unmap_guest_memory(&self, slot: SlotId) -> io::Result<()> {
+        let region = kvm_userspace_memory_region {
+            slot,
+            ..Default::default() // Zero `memory_size` indicates removal (see: https://www.kernel.org/doc/Documentation/virt/kvm/api.txt)
+        };
+        
+        if unsafe { libc::ioctl(self.vm_fd, KVM_SET_USER_MEMORY_REGION, &region) } < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn queue_interrupt(&self, irq_num: u32) -> io::Result<()> {
+        let mut kvm_interrupt = kvm_interrupt { irq: irq_num };
+
+        if unsafe { libc::ioctl(self.vcpu_fd, KVM_INTERRUPT, &raw mut kvm_interrupt) } < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn create_device(&self, device_type: u32, flags: u32) -> io::Result<RawFd> {
+        let attr = kvm_create_device {
+            type_: device_type,
+            fd: 0,
+            flags,
+        };
+        
+        if unsafe { libc::ioctl(self.vm_fd, KVM_CREATE_DEVICE, &attr as *const _) } < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(attr.fd as _)
+        }
+    }
+
     fn create_vm(fd: RawFd) -> io::Result<i32> {
         let fd = unsafe { libc::ioctl(fd, KVM_CREATE_VM, 0) };
 
@@ -171,9 +247,12 @@ impl Drop for Kvm {
     }
 }
 
-fn pgroundup<T: Add<Output = T> + BitAnd<Output = T> + From<u32>>(value: T) -> T {
-    (value + 4095.into()) & (!4095).into()
+fn pgroundup<T: PrimInt>(value: T) -> T {
+    let mask = T::from(4095).expect("generic primitive integer type used for pgroundup should be able to store 4095");
+    (value + mask) & !mask
 }
+
+pub type SlotId = u32;
 
 const KVM_DEVICE_FILE_PATH: &str = "/dev/kvm";
 
