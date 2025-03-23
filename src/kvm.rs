@@ -219,6 +219,24 @@ impl Kvm {
         }
     }
 
+    pub fn translate_address(&self, guest_linear_address: u64) -> io::Result<TranslatedAddress> {
+        let mut kvm_translation = kvm_translation {
+            linear_address: guest_linear_address,
+            ..Default::default()
+        };
+
+        if unsafe { libc::ioctl(self.vcpu_fd, KVM_TRANSLATE, &raw mut kvm_translation) } < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(TranslatedAddress{
+                physical_address: kvm_translation.physical_address,
+                valid: kvm_translation.valid != 0,
+                writable: kvm_translation.writeable != 0,
+                usermode: kvm_translation.usermode != 0,
+            })
+        }
+    }
+
     fn create_vm(fd: RawFd) -> io::Result<i32> {
         let fd = unsafe { libc::ioctl(fd, KVM_CREATE_VM, 0) };
 
@@ -253,6 +271,13 @@ fn pgroundup<T: PrimInt>(value: T) -> T {
 }
 
 pub type SlotId = u32;
+
+pub struct TranslatedAddress {
+    physical_address: u64,
+    valid: bool,
+    writable: bool,
+    usermode: bool,
+}
 
 const KVM_DEVICE_FILE_PATH: &str = "/dev/kvm";
 
