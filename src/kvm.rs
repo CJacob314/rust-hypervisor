@@ -11,7 +11,16 @@ use nix::unistd::close;
 
 use crate::error;
 
-include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+#[allow(unused)]
+#[allow(non_snake_case)]
+#[allow(non_camel_case_types)]
+#[allow(dead_code)]
+#[allow(non_upper_case_globals)]
+#[allow(unsafe_op_in_unsafe_fn)]
+mod bindings {
+    include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+}
+pub use bindings::*;
 
 use crate::MmapChunk;
 
